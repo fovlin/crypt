@@ -21,7 +21,7 @@ var (
 func main() {
 
 	flag.StringVar(&outputFile, "o", "", "Out file")
-	flag.StringVar(&key, "k", "", "Input file")
+	flag.StringVar(&key, "k", "", "Key")
 	flag.StringVar(&iv, "i", "", "Input file")
 	flag.Parse()
 	
@@ -36,11 +36,13 @@ func main() {
 		"setkey": setKey,
 
 		"genkey": genKey,
+		
 		"gethex": getHex,
 
 	}
 
 	function, ok := cmdMap[command]
+
 	if !ok {
 		record.Error("Command not found")
 		os.Exit(1)
@@ -50,6 +52,7 @@ func main() {
 }
 
 func en() {
+
 	inputFile := flag.Arg(1)
 
 	key, err := crypter.GetUserKey()
@@ -57,20 +60,13 @@ func en() {
 		record.Error("%v", err)
 		os.Exit(1)
 	}
-	iv, err := crypter.GenIv()
+	record.Info("Using key: %v", hex.EncodeToString(key))
+
+	err = crypter.GCMEncrypt(inputFile, outputFile, key)
 	if err != nil {
 		record.Error("%v", err)
 		os.Exit(1)
 	}
-
-	err = crypter.Encrypt(inputFile, outputFile, key, iv)
-	if err != nil {
-		record.Error("%v", err)
-		os.Exit(1)
-	}
-
-	record.Info("Used key: %v", hex.EncodeToString(key))
-	record.Info("Used iv: %v", hex.EncodeToString(iv))
 
 }
 
@@ -82,21 +78,13 @@ func de() {
 		record.Error("%v", err)
 		os.Exit(1)
 	}
+	record.Info("Using key: %v", hex.EncodeToString(key))
 
-	iv, err := crypter.GetFileIv(inputFile)
+	err = crypter.GCMDecrypt(inputFile, outputFile,key)
 	if err != nil {
 		record.Error("%v", err)
 		os.Exit(1)
 	}
-
-	err = crypter.Decrypt(inputFile, outputFile,key, iv)
-	if err != nil {
-		record.Error("%v", err)
-		os.Exit(1)
-	}
-
-	record.Info("Used key: %v", hex.EncodeToString(key))
-	record.Info("Used iv: %v", hex.EncodeToString(iv))
 }
 
 func setKey() {
@@ -127,8 +115,12 @@ func genKey() {
 
 	record.Info("Your key: %v", keyHexString)
 
-	crypter.SetUserKey(keyHexString)
-
+	err = crypter.SetUserKey(keyHexString)
+	
+	if err != nil {
+		record.Error("%v", err)
+		os.Exit(1)
+	}
 }
 
 func getHex() {
