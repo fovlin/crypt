@@ -17,7 +17,7 @@ import (
 	"strings"
 )
 
-func Encrypt(inputFile string, outputFile string, key []byte, iv []byte) error {
+func CTREncrypt(inputFile string, outputFile string, key []byte, iv []byte) error {
 	
 	if inputFile == "" {
 		return errors.New("Input file name is missing")
@@ -67,7 +67,7 @@ func Encrypt(inputFile string, outputFile string, key []byte, iv []byte) error {
 }
 
 
-func Decrypt(inputFile string, outputFile string, key []byte, iv []byte) error {
+func CTRDecrypt(inputFile string, outputFile string, key []byte, iv []byte) error {
 
 	if inputFile == "" {
 		return errors.New("Input file name is missing")
@@ -109,6 +109,117 @@ func Decrypt(inputFile string, outputFile string, key []byte, iv []byte) error {
 	return nil
 }
 
+func GCMEncrypt(inputFile string, outputFile string, key []byte) (err error) {
+
+	file, err := os.Open(inputFile)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	if outputFile == "" {
+		outputFile = inputFile + ".enc"
+	}
+	
+	encFile, err := os.Create(outputFile)
+	if err != nil {
+		return err
+	}
+
+	block, err := aes.NewCipher(key)
+
+	aesgcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return err
+	}
+
+	buf := make([]byte, 64 * 1024)
+	for {
+
+		readLength, err := file.Read(buf)
+		if err == io.EOF {
+			break
+		}
+
+		iv, err := GenRandomData(12)
+		if err != nil {
+			return err
+		}
+
+		_, err = encFile.Write(iv)
+		if err != nil {
+			return err
+		}
+
+		cipherData := aesgcm.Seal(nil, iv, buf[:readLength], nil)
+		_, err = encFile.Write(cipherData)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+
+func GCMDecrypt(inputFile string, outputFile string, key []byte) (err error) {
+
+	file, err := os.Open(inputFile)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	
+	if outputFile == "" {
+		if strings.HasSuffix(inputFile, ".enc") {
+			outputFile, _ = strings.CutSuffix(inputFile, ".enc")
+		} else {
+			outputFile = inputFile + ".dec"
+		}
+	}
+
+	decFile, err := os.Create(outputFile)
+	if err != nil {
+		return err
+	}
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return err
+	}
+
+	aesgcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return err
+	}
+	
+	buf := make([]byte, 12 + 64 * 1024 + 16)
+
+	for {
+
+		readLength, err := file.Read(buf)
+		if err == io.EOF {
+			break
+		}
+
+		iv := make([]byte, 12)
+		copy(iv, buf[:12])
+
+		data, err := aesgcm.Open(nil, iv, buf[12:readLength], nil)
+		if err != nil {
+			return err
+		}
+
+		_, err = decFile.Write(data)
+		if err != nil {
+			return err
+		}
+
+		clear(iv)
+	}
+
+	return nil
+}
 
 func GetUserKey() (key []byte ,err error) {
 
@@ -117,7 +228,7 @@ func GetUserKey() (key []byte ,err error) {
 		return nil, err
 	}
 
-	configFilePath := path.Join(homeDir, ".config", "crypt.conf")
+	configFilePath := path.Join(homeDir, ".crypt.conf")
 
 	configFileData, err := os.ReadFile(configFilePath)
 	if err != nil {
@@ -146,23 +257,6 @@ func GetUserKey() (key []byte ,err error) {
 
 }
 
-func GetFileIv(inputFile string) (iv []byte, err error) {
-
-	file, err := os.Open(inputFile)
-	if err != nil {
-		return nil, err
-	}
-
-	iv = make([]byte, 16)
-
-	_, err = io.ReadFull(file, iv)
-	if err != nil {
-		return nil, err
-	}
-
-	return iv, nil
-}
-
 func SetUserKey(key string) error {
 
 	homeDir, err := os.UserHomeDir()
@@ -170,14 +264,25 @@ func SetUserKey(key string) error {
 		return err
 	}
 
-	configFilePath := path.Join(homeDir, ".config", "crypt.conf")
-
-	_, err = os.Stat(configFilePath)
+	homeDirStat, err := os.Stat(homeDir)
 	if err != nil {
-		err = os.MkdirAll(path.Join(homeDir, ".config"), 0766)
+		err = os.MkdirAll(path.Join(homeDir), 0766)
 		if err != nil {
 			return err
 		}
+	}
+	if !homeDirStat.IsDir() {
+		return errors.New("User home path isn't a directory")
+	}
+
+	configFilePath := path.Join(homeDir, ".crypt.conf")
+
+	configFileSata, err := os.Stat(configFilePath)
+	if err != nil {
+		os.WriteFile(configFilePath, nil, 0700)
+	}
+	if err == nil && configFileSata.IsDir() {
+		return errors.New("Config file \"" + configFilePath + "\" is a directory")
 	}
 
 	configFileData, err := os.ReadFile(configFilePath)
@@ -185,12 +290,9 @@ func SetUserKey(key string) error {
 		return err
 	}
 
-	var userConfig map[string]any
+	userConfig := make(map[string]any)
 
-	err = json.Unmarshal(configFileData, &userConfig)
-	if err != nil {
-		return err
-	}
+	_ = json.Unmarshal(configFileData, &userConfig)
 
 	userConfig["key"] = key
 
@@ -199,7 +301,7 @@ func SetUserKey(key string) error {
 		return err
 	}
 
-	err = os.WriteFile(configFilePath, configData, 0766)
+	err = os.WriteFile(configFilePath, configData, 0700)
 	if err != nil {
 		return err
 	}
@@ -232,9 +334,9 @@ func GenKey(length int, seed string) (key []byte,err error) {
 	return key, nil
 }
 
-func GenIv() (iv []byte,err error) {
+func GenRandomData(length int) (iv []byte, err error) {
 
-	iv = make([]byte, 16)
+	iv = make([]byte, length)
 	_, err = io.ReadFull(rand.Reader, iv)
 	if err != nil {
 		return nil, err
