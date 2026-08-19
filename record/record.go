@@ -18,5 +18,5 @@ func Error(format string, value ...any) {
 }
 
 func Debug(format string, value ...any) {
-	fmt.Fprintf(os.Stderr, "[\033[1;34mDebug\033[0m]: "+format+"\n", value...)
+	fmt.Fprintf(os.Stdout, "[\033[1;34mDebug\033[0m]: "+format+"\n", value...)
 }
