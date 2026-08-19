@@ -22,7 +22,6 @@ func main() {
 
 	flag.StringVar(&outputFile, "o", "", "Out file")
 	flag.StringVar(&key, "k", "", "Key")
-	flag.StringVar(&iv, "i", "", "Input file")
 	flag.Parse()
 	
 	command := flag.Arg(0)
@@ -60,7 +59,7 @@ func en() {
 		record.Error("%v", err)
 		os.Exit(1)
 	}
-	record.Info("Using key: %v", hex.EncodeToString(key))
+	// record.Info("Using key: %v", hex.EncodeToString(key))
 
 	err = crypter.GCMEncrypt(inputFile, outputFile, key)
 	if err != nil {
@@ -78,7 +77,7 @@ func de() {
 		record.Error("%v", err)
 		os.Exit(1)
 	}
-	record.Info("Using key: %v", hex.EncodeToString(key))
+	// record.Info("Using key: %v", hex.EncodeToString(key))
 
 	err = crypter.GCMDecrypt(inputFile, outputFile,key)
 	if err != nil {

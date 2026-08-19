@@ -10,8 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-
-	// "crypto/rand"
 	"os"
 	"path"
 	"strings"
@@ -25,6 +23,10 @@ func CTREncrypt(inputFile string, outputFile string, key []byte, iv []byte) erro
 
 	if outputFile == "" {
 		outputFile = inputFile + ".enc"
+	}
+
+	if _, err := os.Stat(outputFile); !os.IsNotExist(err) {
+		return errors.New("Output file \"" + outputFile + "\" existed")
 	}
 
 	cipherBlock, err := aes.NewCipher(key)
@@ -81,6 +83,10 @@ func CTRDecrypt(inputFile string, outputFile string, key []byte, iv []byte) erro
 		}
 	}
 
+	if _, err := os.Stat(outputFile); !os.IsNotExist(err) {
+		return errors.New("Output file \"" + outputFile + "\" existed")
+	}
+
 	cipherBlock, err := aes.NewCipher(key)
 	if err != nil {
 		return err
@@ -121,12 +127,19 @@ func GCMEncrypt(inputFile string, outputFile string, key []byte) (err error) {
 		outputFile = inputFile + ".enc"
 	}
 	
+	if _, err = os.Stat(outputFile); !os.IsNotExist(err) {
+		return errors.New("Output file \"" + outputFile + "\" existed")
+	}
+	
 	encFile, err := os.Create(outputFile)
 	if err != nil {
 		return err
 	}
 
 	block, err := aes.NewCipher(key)
+	if err != nil {
+		return err
+	}
 
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
@@ -136,9 +149,12 @@ func GCMEncrypt(inputFile string, outputFile string, key []byte) (err error) {
 	buf := make([]byte, 64 * 1024)
 	for {
 
-		readLength, err := file.Read(buf)
+		readLength, err := io.ReadFull(file, buf)
 		if err == io.EOF {
 			break
+		}
+		if err != nil && err != io.ErrUnexpectedEOF {
+			return err
 		}
 
 		iv, err := GenRandomData(12)
@@ -156,6 +172,7 @@ func GCMEncrypt(inputFile string, outputFile string, key []byte) (err error) {
 		if err != nil {
 			return err
 		}
+
 	}
 
 	return nil
@@ -178,6 +195,11 @@ func GCMDecrypt(inputFile string, outputFile string, key []byte) (err error) {
 		}
 	}
 
+	if _, err = os.Stat(outputFile); !os.IsNotExist(err) {
+		return errors.New("Output file \"" + outputFile + "\" existed")
+	}
+	
+
 	decFile, err := os.Create(outputFile)
 	if err != nil {
 		return err
@@ -197,9 +219,16 @@ func GCMDecrypt(inputFile string, outputFile string, key []byte) (err error) {
 
 	for {
 
-		readLength, err := file.Read(buf)
+		readLength, err := io.ReadFull(file, buf)
 		if err == io.EOF {
 			break
+		}
+		if err != nil && err != io.ErrUnexpectedEOF {
+			return err
+		}
+
+		if readLength < 12 + 16 {
+			return errors.New("damaged block")
 		}
 
 		iv := make([]byte, 12)
@@ -265,14 +294,21 @@ func SetUserKey(key string) error {
 	}
 
 	homeDirStat, err := os.Stat(homeDir)
-	if err != nil {
+	if os.IsNotExist(err) {
 		err = os.MkdirAll(path.Join(homeDir), 0766)
 		if err != nil {
 			return err
 		}
+		homeDirStat, err = os.Stat(homeDir)
+		if err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) && err != nil {
+		return err
 	}
+
 	if !homeDirStat.IsDir() {
-		return errors.New("User home path isn't a directory")
+		return errors.New("user home path isn't a directory")
 	}
 
 	configFilePath := path.Join(homeDir, ".crypt.conf")
