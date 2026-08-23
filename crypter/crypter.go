@@ -308,7 +308,7 @@ func SetUserKey(key string) error {
 	}
 
 	if !homeDirStat.IsDir() {
-		return errors.New("user home path isn't a directory")
+		return errors.New(homeDirPath + " isn't a directory")
 	}
 
 	configFilePath := path.Join(homeDir, ".crypt.conf")
