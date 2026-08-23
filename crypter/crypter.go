@@ -1,8 +1,6 @@
 package crypter
 
 import (
-	"bytes"
-	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
@@ -12,144 +10,33 @@ import (
 	"io"
 	"os"
 	"path"
-	"strings"
 )
 
-func CTREncrypt(inputFile string, outputFile string, key []byte, iv []byte) error {
-	
-	if inputFile == "" {
-		return errors.New("Input file name is missing")
-	}
-
-	if outputFile == "" {
-		outputFile = inputFile + ".enc"
-	}
-
-	if _, err := os.Stat(outputFile); !os.IsNotExist(err) {
-		return errors.New("Output file \"" + outputFile + "\" existed")
-	}
-
-	cipherBlock, err := aes.NewCipher(key)
-	if err != nil {
-		return err
-	}
-
-	fileReader, err := os.Open(inputFile)
-	if err != nil {
-		return err
-	}
-
-	defer fileReader.Close()
-
-	stream := cipher.NewCTR(cipherBlock, iv)
-	encFile, err := os.Create(outputFile)
-	if err != nil {
-		return err
-	}
-
-	var cipherStreamWriter cipher.StreamWriter
-	cipherStreamWriter.S = stream
-	cipherStreamWriter.W = encFile
-	cipherStreamWriter.Err = nil
-
-	buf := bytes.NewBuffer(iv)
-
-	_, err = io.Copy(encFile, buf)
-	if err != nil {
-		return err
-	}
-	
-	_, err = io.Copy(cipherStreamWriter, fileReader)
-	if err != nil {
-		return err
-	}
-
-	return nil
-
+type GCMCipherWriter struct {
+	Writer io.Writer
+	BlockSize int
+	AEAD cipher.AEAD
 }
 
-
-func CTRDecrypt(inputFile string, outputFile string, key []byte, iv []byte) error {
-
-	if inputFile == "" {
-		return errors.New("Input file name is missing")
+func NewGCMWriter(Writer io.Writer, BlockSize int, AEAD cipher.AEAD) GCMCipherWriter {
+	var GCMCrypter GCMCipherWriter = GCMCipherWriter{
+		Writer,
+		BlockSize,
+		AEAD,
 	}
-
-	if outputFile == "" {
-		if strings.HasSuffix(inputFile, ".enc") {
-			outputFile, _ = strings.CutSuffix(inputFile, ".enc")
-		} else {
-			outputFile = inputFile + ".dec"
-		}
-	}
-
-	if _, err := os.Stat(outputFile); !os.IsNotExist(err) {
-		return errors.New("Output file \"" + outputFile + "\" existed")
-	}
-
-	cipherBlock, err := aes.NewCipher(key)
-	if err != nil {
-		return err
-	}
-
-	fileReader, err := os.Open(inputFile)
-	if err != nil {
-		return err
-	}
-	defer fileReader.Close()
-
-	stream := cipher.NewCTR(cipherBlock, iv)
-	decFile, err := os.Create(outputFile)
-	if err != nil {
-		return err
-	}
-
-	var cipherStreamReader cipher.StreamReader
-	cipherStreamReader.S = stream
-	cipherStreamReader.R = fileReader
-
-	fileReader.Read(iv)
-
-	io.Copy(decFile, cipherStreamReader)
-
-	return nil
+	return GCMCrypter
 }
 
-func GCMEncrypt(inputFile string, outputFile string, key []byte) (err error) {
+func GCMEncrypt(GCMCipherWriter GCMCipherWriter,ioReader io.Reader) (err error) {
 
-	file, err := os.Open(inputFile)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
+	Writer := GCMCipherWriter.Writer
+	BlockSize := GCMCipherWriter.BlockSize
+	AEAD := GCMCipherWriter.AEAD
 
-	if outputFile == "" {
-		outputFile = inputFile + ".enc"
-	}
-	
-	if _, err = os.Stat(outputFile); !os.IsNotExist(err) {
-		return errors.New("Output file \"" + outputFile + "\" existed")
-	}
-	
-	encFile, err := os.Create(outputFile)
-	if err != nil {
-		return err
-	}
-
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return err
-	}
-
-	aesgcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return err
-	}
-
-	buf := make([]byte, 64 * 1024)
+	buf := make([]byte, BlockSize)
 	for {
 
-		readLength, err := io.ReadFull(file, buf)
+		readLength, err := io.ReadFull(ioReader, buf)
 		if err == io.EOF {
 			break
 		}
@@ -162,13 +49,13 @@ func GCMEncrypt(inputFile string, outputFile string, key []byte) (err error) {
 			return err
 		}
 
-		_, err = encFile.Write(iv)
+		_, err = Writer.Write(iv)
 		if err != nil {
 			return err
 		}
 
-		cipherData := aesgcm.Seal(nil, iv, buf[:readLength], nil)
-		_, err = encFile.Write(cipherData)
+		cipherData := AEAD.Seal(nil, iv, buf[:readLength], nil)
+		_, err = Writer.Write(cipherData)
 		if err != nil {
 			return err
 		}
@@ -176,50 +63,20 @@ func GCMEncrypt(inputFile string, outputFile string, key []byte) (err error) {
 	}
 
 	return nil
+
 }
 
 
-func GCMDecrypt(inputFile string, outputFile string, key []byte) (err error) {
+func GCMDecrypt(GCMCipherWriter GCMCipherWriter,ioReader io.Reader) (err error) {
 
-	file, err := os.Open(inputFile)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	
-	if outputFile == "" {
-		if strings.HasSuffix(inputFile, ".enc") {
-			outputFile, _ = strings.CutSuffix(inputFile, ".enc")
-		} else {
-			outputFile = inputFile + ".dec"
-		}
-	}
+	Writer := GCMCipherWriter.Writer
+	BlockSize := GCMCipherWriter.BlockSize
+	AEAD := GCMCipherWriter.AEAD
 
-	if _, err = os.Stat(outputFile); !os.IsNotExist(err) {
-		return errors.New("Output file \"" + outputFile + "\" existed")
-	}
-	
-
-	decFile, err := os.Create(outputFile)
-	if err != nil {
-		return err
-	}
-
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return err
-	}
-
-	aesgcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return err
-	}
-	
-	buf := make([]byte, 12 + 64 * 1024 + 16)
-
+	buf := make([]byte, 12 + BlockSize + 16)
 	for {
 
-		readLength, err := io.ReadFull(file, buf)
+		readLength, err := io.ReadFull(ioReader, buf)
 		if err == io.EOF {
 			break
 		}
@@ -234,12 +91,12 @@ func GCMDecrypt(inputFile string, outputFile string, key []byte) (err error) {
 		iv := make([]byte, 12)
 		copy(iv, buf[:12])
 
-		data, err := aesgcm.Open(nil, iv, buf[12:readLength], nil)
+		data, err := AEAD.Open(nil, iv, buf[12:readLength], nil)
 		if err != nil {
 			return err
 		}
 
-		_, err = decFile.Write(data)
+		_, err = Writer.Write(data)
 		if err != nil {
 			return err
 		}
@@ -273,12 +130,12 @@ func GetUserKey() (key []byte ,err error) {
 
 	keyData, ok := configData["key"]
 	if !ok {
-		return nil, errors.New("(Config file error) \"key\" not found")
+		return nil, errors.New("(config file error) \"key\" not found")
 	}
 
 	_, ok = keyData.(string)
 	if !ok {
-		return nil, errors.New("(Config file error) \"key\"isn't a string")
+		return nil, errors.New("(config file error) \"key\"isn't a string")
 	}
 	key, err = hex.DecodeString(keyData.(string))
 
@@ -308,7 +165,7 @@ func SetUserKey(key string) error {
 	}
 
 	if !homeDirStat.IsDir() {
-		return errors.New(homeDirPath + " isn't a directory")
+		return errors.New(homeDir + " isn't a directory")
 	}
 
 	configFilePath := path.Join(homeDir, ".crypt.conf")
@@ -318,7 +175,7 @@ func SetUserKey(key string) error {
 		os.WriteFile(configFilePath, nil, 0700)
 	}
 	if err == nil && configFileSata.IsDir() {
-		return errors.New("Config file \"" + configFilePath + "\" is a directory")
+		return errors.New("config file \"" + configFilePath + "\" is a directory")
 	}
 
 	configFileData, err := os.ReadFile(configFilePath)
@@ -349,12 +206,12 @@ func SetUserKey(key string) error {
 func GenKey(length int, seed string) (key []byte,err error) {
 
 	if length != 16 && length != 24 && length != 32 {
-		return nil, errors.New("Only supports 16, 24, 32 bits length")
+		return nil, errors.New("only supports 16, 24, 32 bits length")
 	}
 
 	if seed != "" {
 		if length != 32 {
-			return nil, errors.New("Seed mode only supports 32 bits length")
+			return nil, errors.New("seed mode only supports 32 bits length")
 		}
 		hash := sha256.New()
 		hash.Write([]byte(seed))

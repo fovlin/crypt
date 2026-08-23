@@ -1,10 +1,13 @@
 package main
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"encoding/hex"
 	"flag"
 	"os"
 	"strconv"
+	"errors"
 
 	"acovia.net/crypter"
 	"acovia.net/record"
@@ -20,7 +23,6 @@ var (
 
 func main() {
 
-	flag.StringVar(&outputFile, "o", "", "Out file")
 	flag.StringVar(&key, "k", "", "Key")
 	flag.Parse()
 	
@@ -40,10 +42,14 @@ func main() {
 
 	}
 
+	if len(flag.Arg(0)) == 0 {
+		record.Error("%v", errors.New("command missing"))
+	}
+
 	function, ok := cmdMap[command]
 
 	if !ok {
-		record.Error("Command not found")
+		record.Error("command not found")
 		os.Exit(1)
 	}
 
@@ -52,38 +58,92 @@ func main() {
 
 func en() {
 
+	if len(flag.Arg(1)) == 0 {
+		record.Error("%v", errors.New("input file missing"))
+	}
 	inputFile := flag.Arg(1)
+
+	if len(flag.Arg(2)) != 0 {
+		outputFile = flag.Arg(2)
+	} else {
+		outputFile = inputFile + ".enc"
+	}
 
 	key, err := crypter.GetUserKey()
 	if err != nil {
 		record.Error("%v", err)
 		os.Exit(1)
 	}
-	// record.Info("Using key: %v", hex.EncodeToString(key))
 
-	err = crypter.GCMEncrypt(inputFile, outputFile, key)
+	file, err := os.Open(inputFile)
 	if err != nil {
 		record.Error("%v", err)
-		os.Exit(1)
 	}
+
+	cipherFile, err := os.Create(outputFile)
+	if err != nil {
+		record.Error("%v", err)
+	}
+
+	aesBlock, err := aes.NewCipher(key) 
+	if err != nil {
+		record.Error("%v", err)
+	}
+
+	AEAD, err := cipher.NewGCM(aesBlock)
+	if err != nil {
+		record.Error("%v", err)
+	}
+
+	GCMCipherWriter := crypter.NewGCMWriter(cipherFile, 64 * 1024, AEAD)
+
+	crypter.GCMEncrypt(GCMCipherWriter, file)
 
 }
 
 func de() {
+
+	if len(flag.Arg(1)) == 0 {
+		record.Error("%v", errors.New("input file missing"))
+	}
 	inputFile := flag.Arg(1)
+
+	if len(flag.Arg(2)) != 0 {
+		outputFile = flag.Arg(2)
+	} else {
+		outputFile = inputFile + ".dec"
+	}
 
 	key, err := crypter.GetUserKey()
 	if err != nil {
 		record.Error("%v", err)
 		os.Exit(1)
 	}
-	// record.Info("Using key: %v", hex.EncodeToString(key))
 
-	err = crypter.GCMDecrypt(inputFile, outputFile,key)
+	file, err := os.Open(inputFile)
 	if err != nil {
 		record.Error("%v", err)
-		os.Exit(1)
 	}
+
+	plainTextFile, err := os.Create(outputFile)
+	if err != nil {
+		record.Error("%v", err)
+	}
+
+	aesBlock, err := aes.NewCipher(key) 
+	if err != nil {
+		record.Error("%v", err)
+	}
+
+	AEAD, err := cipher.NewGCM(aesBlock)
+	if err != nil {
+		record.Error("%v", err)
+	}
+
+	GCMCipherWriter := crypter.NewGCMWriter(plainTextFile, 64 * 1024, AEAD)
+
+	crypter.GCMDecrypt(GCMCipherWriter, file)
+
 }
 
 func setKey() {
@@ -112,7 +172,7 @@ func genKey() {
 
 	keyHexString := hex.EncodeToString(key)
 
-	record.Info("Your key: %v", keyHexString)
+	record.Info("your key: %v", keyHexString)
 
 	err = crypter.SetUserKey(keyHexString)
 	
