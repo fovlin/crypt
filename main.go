@@ -4,10 +4,12 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/hex"
+	"errors"
 	"flag"
+	"fmt"
+	"io"
 	"os"
 	"strconv"
-	"errors"
 
 	"acovia.net/crypter"
 	"acovia.net/record"
@@ -44,6 +46,7 @@ func main() {
 
 	if len(flag.Arg(0)) == 0 {
 		record.Error("%v", errors.New("command missing"))
+		os.Exit(1)
 	}
 
 	function, ok := cmdMap[command]
@@ -184,6 +187,29 @@ func genKey() {
 
 func getHex() {
 	inputFile := flag.Arg(1)
-	file, _ := os.ReadFile(inputFile)
-	record.Info("%v", hex.EncodeToString(file))
+	var size int64 = 4
+	if len(inputFile) == 0 {
+		record.Error("input file is missing")
+	}
+
+	if len(flag.Arg(2)) != 0 {
+		n, err := strconv.ParseInt(flag.Arg(2), 10, 36)
+		if err != nil {
+			record.Error("%v", err)
+		}
+		size = n
+	}
+
+	file, _ := os.Open(inputFile)
+	buf := make([]byte, size)
+	for {
+		n, err := file.Read(buf)
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			record.Error("%v", err)
+		}
+
+		fmt.Println(hex.EncodeToString(buf[:n]))
+	}
 }
